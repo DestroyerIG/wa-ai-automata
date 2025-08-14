@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bot
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - app-network
+
+  # Redis (for queues and cache)
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+
+  # Node.js API Server
+  server:
+    build:
+      context: ./apps/server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - PORT=3001
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/bot
+      - REDIS_URL=redis://redis:6379
+      - NODE_ENV=production
+    ports:
+      - "3001:3001"
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./apps/server:/app
+      - /app/node_modules
+    networks:
+      - app-network
+
+  # Next.js Web Dashboard
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=your-secret-key-change-in-production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - server
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+    networks:
+      - app-network
+
+  # Ngrok for development (webhook tunnel)
+  ngrok:
+    image: ngrok/ngrok:latest
+    restart: unless-stopped
+    command:
+      - "start"
+      - "--all"
+      - "--config"
+      - "/etc/ngrok.yml"
+    volumes:
+      - ./ngrok.yml:/etc/ngrok.yml
+    ports:
+      - "4040:4040"
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    depends_on:
+      - server
+    networks:
+      - app-network
+    profiles:
+      - dev
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  app-network:
+    driver: bridge
